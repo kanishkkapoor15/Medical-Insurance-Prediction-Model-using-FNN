@@ -1,0 +1,191 @@
+---
+title: "insuranceAnalysis"
+author: "Kanishk Kapoor"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+# Data manipulation and visualization
+library(tidyverse)      # dplyr, ggplot2, etc.
+library(caret)          # for data splitting and pre-processing
+library(data.table)     # optional: fast data wrangling
+library(ggplot2)        # plotting (if not using full tidyverse)
+
+# Encoding and preprocessing
+library(recipes)        # for preprocessing pipelines (like one-hot encoding, normalization)
+library(modelr)         # helps with model-related workflows
+
+# Neural network modeling
+library(keras)          # for building neural networks
+library(tensorflow)     # backend for keras
+
+# Optional - Visualization of neural net training
+library(ggpubr)         # for combining plots nicely
+```
+##A regression model that can predict future insurance costs for a new customer based on their profile.
+
+```{r}
+i_data <- read.csv("insurance.csv",stringsAsFactors = FALSE)
+```
+```{r}
+head(i_data)
+str(i_data)
+colSums(is.na(i_data))
+```
+```{r}
+i_data$sex <- as.factor(i_data$sex)
+i_data$sex <- ifelse(i_data$sex == "male", 1,0)
+
+i_data$smoker <- as.factor(i_data$smoker)
+i_data$smoker <- ifelse(i_data$smoker =="yes", 1, 0)
+
+
+i_data$region <- as.factor(i_data$region)
+region_encoded <- model.matrix(~ region -1, data = i_data)
+i_data <- cbind(i_data %>% select(-region), region_encoded)
+
+```
+
+```{r}
+str(i_data)
+head(i_data)
+```
+
+```{r}
+#TRAIN AND TEST SPLIT
+
+set.seed(123)
+
+index <- createDataPartition(i_data$charges, p= 0.8, list = FALSE)
+
+train_data <- i_data[index, ]
+test_data <- i_data[-index, ]
+```
+
+```{r}
+#NORMALIZING NUMERIC INPUTS EXCUDING CHARGES
+features <- setdiff(names(train_data),"charges")
+
+
+sds <- apply(train_data[,features], 2, sd)
+zero_sd_cols <- names(sds[sds == 0])
+zero_sd_cols
+```
+
+
+```{r}
+
+
+#CALCULATE MEAN AND SD FROM TRAIN
+
+means<- apply(train_data[, features], 2, mean)
+sds <- apply(train_data[, features],2, sd)
+any(sds == 0)
+
+```
+
+```{r}
+
+#SCALE BOTH TRAINING AND TEST SETS
+
+train_data[, features] <- scale(train_data[, features], center = means ,scale = sds)
+test_data[, features] <- scale(test_data[, features], center = means, scale = sds)
+```
+
+```{r}
+colSums(is.na(train_data[, features]))
+colSums(is.na(test_data[,features]))
+```
+
+
+```{r}
+x_train <- as.matrix(train_data[, features])
+y_train <- train_data$charges
+
+x_test <- as.matrix(test_data[, features])
+y_test <- test_data$charges
+
+```
+
+
+```{r}
+#KERAS MODEL
+model <- keras_model_sequential() %>%
+  layer_dense(units=64, activation = "relu", input_shape = ncol(x_train)) %>%
+  layer_dense(units=32, activation="relu") %>%
+  layer_dense(units = 1 )
+
+model %>% compile(
+  loss="mse",
+  optimizer = optimizer_adam(),
+  metrics = list("mae")
+)
+
+
+```
+```{r}
+#TRAIN MODEL
+
+history <- model %>% fit(
+  x = x_train,
+  y = y_train,
+  epochs = 100,
+  batch_size = 32,
+  validation_split = 0.2
+)
+```
+```{r}
+plot(history)
+```
+```{r}
+model %>% evaluate(x_test, y_test)
+```
+```{r}
+predictions <- model %>% predict(x_test)
+
+results_df <- data.frame(
+  Actual = y_test,
+  Predicted = as.vector(predictions)
+)
+
+ggplot(results_df, aes(x= Actual, y= Predicted)) +
+  geom_point(alpha = 0.6, color="hotpink") +
+  geom_abline(intercept = 0, slope = 1, color ="black", linetype = "dashed") +
+  labs(title = "Actual vs Predicted Insurance Charges",
+       x="Actual Chrages",
+       y="Predicted") +
+  theme_minimal()
+```
+
+```{r}
+test_data$Predicted <- as.vector(predictions)
+
+ggplot(test_data, aes(x = bmi, y = Predicted, color = factor(smoker))) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Predicted Charges by BMI and Smoker Status",
+       x = "BMI",
+       y = "Predicted Charges",
+       color = "Smoker") +
+  theme_minimal()
+```
+
+
+Conclusion
+
+In this project, we developed a regression-based deep learning model using a feedforward neural network (FNN) to predict insurance charges based on key customer attributes such as age, BMI, smoking status, region, and more. We performed comprehensive data preprocessing including factor encoding, one-hot encoding, normalization, and train-test splitting to ensure optimal model performance.
+
+The model was trained and evaluated using mean absolute error (MAE) and loss metrics. The final MAE of approximately 3966 indicates the model can predict insurance costs with a reasonable level of accuracy. The training and validation loss curves demonstrate smooth convergence, suggesting the model generalizes well to unseen data without overfitting.
+
+This predictive model holds strong business value for insurance providers. It can be leveraged to:
+	•	Accurately estimate individual premiums,
+	•	Perform customer risk assessment,
+	•	Forecast future claim expenses, and
+	•	Aid in designing personalized insurance products.
+
+With proper integration into a data pipeline and periodic retraining, this model can serve as a powerful tool for enhancing data-driven decision-making in the insurance industry.
